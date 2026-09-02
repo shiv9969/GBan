@@ -1,0 +1,22 @@
+DEPLOYMENT NOTES
+
+Vercel:
+1. Upload this project with api/webhook.py, bot.py, info.py, requirements.txt, vercel.json.
+2. Add Environment Variable:
+   BOT_TOKEN = your NEW Telegram bot token
+3. Deploy.
+4. Set Telegram webhook to:
+   https://YOUR-VERCEL-DOMAIN.vercel.app/api/webhook
+
+Koyeb:
+- This bot.py still supports the existing polling + port 8000 health server.
+- Procfile remains: web: python bot.py
+
+IMPORTANT DATABASE NOTE:
+The bot still uses SQLite (bot.db). Vercel Functions do not provide a reliable
+persistent SQLite filesystem for bot state. For production, move admins/chats
+to an external persistent PostgreSQL database before relying on Vercel alone.
+
+IMPORTANT:
+Do not publish your Telegram bot token in logs, screenshots, GitHub, or chat.
+Regenerate it in BotFather if it was previously exposed.

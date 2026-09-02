@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import logging
 import threading
@@ -17,7 +18,9 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 
-from info import BOT_TOKEN, OWNER_ID, ADMINS
+from info import BOT_TOKEN as INFO_BOT_TOKEN, OWNER_ID, ADMINS
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", INFO_BOT_TOKEN)
 
 
 # ============================================================
@@ -646,7 +649,7 @@ async def banall(update, context):
                 user_id,
             )
 
-            if check.status == ChatMemberStatus.KICKED:
+            if check.status == "kicked":
 
                 success.append(
                     row["title"]
@@ -844,7 +847,7 @@ async def unbanall(update, context):
                 user_id,
             )
 
-            if check.status != ChatMemberStatus.KICKED:
+            if check.status != "kicked":
 
                 success.append(
                     (
@@ -1351,7 +1354,7 @@ async def my_chat_member(update, context):
 
     if status in (
         ChatMemberStatus.LEFT,
-        ChatMemberStatus.KICKED,
+        "kicked",
     ):
 
         save_chat(
@@ -1389,6 +1392,51 @@ async def error_handler(
 
 
 # ============================================================
+# APPLICATION FACTORY (POLLING + VERCEL WEBHOOK)
+# ============================================================
+
+def build_application(token=None):
+    token = token or BOT_TOKEN
+
+    app = (
+        Application
+        .builder()
+        .token(token)
+        .build()
+    )
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("panel", panel_command))
+    app.add_handler(CommandHandler("banall", banall))
+    app.add_handler(CommandHandler("unbanall", unbanall))
+    app.add_handler(CommandHandler("unban", unban))
+
+    # Buttons
+    app.add_handler(CallbackQueryHandler(buttons))
+
+    # Auto chat registration
+    app.add_handler(
+        ChatMemberHandler(
+            my_chat_member,
+            ChatMemberHandler.MY_CHAT_MEMBER,
+        )
+    )
+
+    # Owner input
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            owner_text,
+        )
+    )
+
+    app.add_error_handler(error_handler)
+
+    return app
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -1411,76 +1459,7 @@ def main():
         daemon=True,
     ).start()
 
-    app = (
-        Application
-        .builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # Commands
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "panel",
-            panel_command,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "banall",
-            banall,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "unbanall",
-            unbanall,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "unban",
-            unban,
-        )
-    )
-
-    # Buttons
-    app.add_handler(
-        CallbackQueryHandler(
-            buttons
-        )
-    )
-
-    # Auto chat registration
-    app.add_handler(
-        ChatMemberHandler(
-            my_chat_member,
-            ChatMemberHandler.MY_CHAT_MEMBER,
-        )
-    )
-
-    # Owner input
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT
-            & ~filters.COMMAND,
-            owner_text,
-        )
-    )
-
-    app.add_error_handler(
-        error_handler
-    )
+    app = build_application()
 
     log.info(
         "Telegram bot starting..."
