@@ -1,5 +1,8 @@
-import sqlite3, logging
+import sqlite3
+import logging
+import threading
 from contextlib import closing
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatMemberStatus
@@ -12,8 +15,31 @@ from telegram.error import TelegramError, Forbidden, BadRequest
 from info import BOT_TOKEN, OWNER_ID, ADMINS
 
 DB_PATH = "bot.db"
+PORT = 8000
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health", "/healthz"):
+            body = b"OK"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+def start_health_server():
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), HealthHandler)
+    log.info("Health server listening on 0.0.0.0:%s", PORT)
+    server.serve_forever()
 
 def db():
     c = sqlite3.connect(DB_PATH)
@@ -144,15 +170,13 @@ async def banall(update, context):
         return await update.message.reply_text(
             "Usage: /banall <user_id>\nOr reply to the user's message with /banall"
         )
-
     rows = chats()
     if not rows:
         return await update.message.reply_text("⚠️ No connected chats.")
-
-    msg = await update.message.reply_text(f"🚫 Banning `{uid}` from {len(rows)} chats...",
-                                          parse_mode="Markdown")
+    msg = await update.message.reply_text(
+        f"🚫 Banning `{uid}` from {len(rows)} chats...", parse_mode="Markdown"
+    )
     ok, fail = [], []
-
     for r in rows:
         try:
             me = await context.bot.get_me()
@@ -160,15 +184,12 @@ async def banall(update, context):
             can_ban = bool(getattr(bot_member, "can_restrict_members", False))
             if r["chat_type"] == "channel":
                 can_ban = bot_member.status == ChatMemberStatus.ADMINISTRATOR
-
             if not can_ban:
                 save_chat(r["chat_id"], r["title"], r["chat_type"], False)
                 fail.append((r["title"], "No ban permission"))
                 continue
-
             await context.bot.ban_chat_member(r["chat_id"], uid, revoke_messages=True)
             check = await context.bot.get_chat_member(r["chat_id"], uid)
-
             if check.status == ChatMemberStatus.KICKED:
                 ok.append(r["title"])
                 save_chat(r["chat_id"], r["title"], r["chat_type"], True)
@@ -176,13 +197,11 @@ async def banall(update, context):
                 fail.append((r["title"], f"Verification: {check.status}"))
         except (Forbidden, BadRequest, TelegramError) as e:
             fail.append((r["title"], str(e)))
-
     out = f"🚫 BAN ALL COMPLETED\n\nUser ID: `{uid}`\n\n✅ Verified: {len(ok)}/{len(rows)}\n❌ Failed: {len(fail)}"
     if ok:
         out += "\n\n✅ Banned:\n" + "\n".join("• " + x for x in ok)
     if fail:
         out += "\n\n❌ Failed:\n" + "\n".join(f"• {n} — {e}" for n,e in fail)
-
     await msg.edit_text(out, parse_mode="Markdown")
     await owner_dm(context, out)
 
@@ -194,7 +213,6 @@ async def unbanall(update, context):
         return await update.message.reply_text(
             "Usage: /unbanall <user_id>\nOr reply to the user's message with /unbanall"
         )
-
     rows = chats()
     ok, fail = [], []
     for r in rows:
@@ -207,7 +225,6 @@ async def unbanall(update, context):
                 fail.append((r["title"], "Still banned"))
         except TelegramError as e:
             fail.append((r["title"], str(e)))
-
     out = f"✅ UNBAN ALL COMPLETED\n\nUser ID: `{uid}`\n\n✅ Success: {len(ok)}/{len(rows)}\n❌ Failed: {len(fail)}"
     if fail:
         out += "\n\n❌ Failed:\n" + "\n".join(f"• {n} — {e}" for n,e in fail)
@@ -219,42 +236,33 @@ async def buttons(update, context):
     await q.answer()
     if q.from_user.id != OWNER_ID:
         return await q.edit_message_text("⛔ Owner only.")
-
     if q.data == "panel":
         return await q.edit_message_text("🛡️ Owner Control Panel", reply_markup=panel())
-
     if q.data == "add":
         context.user_data["adding"] = True
         return await q.edit_message_text(
             "👤 Send Telegram User ID to add.\n\nExample: `123456789`\nSend /cancel to abort.",
             parse_mode="Markdown"
         )
-
     if q.data == "remove":
         rows = admins()
         kb = [[InlineKeyboardButton(f"❌ {r['user_id']}", callback_data=f"rm:{r['user_id']}")]
               for r in rows]
         kb.append([InlineKeyboardButton("◀️ Back", callback_data="panel")])
         return await q.edit_message_text("Select admin to remove:", reply_markup=InlineKeyboardMarkup(kb))
-
     if q.data.startswith("rm:"):
-        uid = int(q.data.split(":")[1])
-        remove_admin(uid)
+        remove_admin(int(q.data.split(":")[1]))
         return await q.edit_message_text("✅ Admin removed.", reply_markup=panel())
-
     if q.data == "listadmins":
         rows = admins()
         text = f"👥 ADMINS\n\n👑 Owner: `{OWNER_ID}`\n"
         text += "\n".join(f"• `{r['user_id']}`" for r in rows) or "• No additional admins"
         return await q.edit_message_text(text, parse_mode="Markdown", reply_markup=panel())
-
     if q.data == "chats":
         rows = chats()
-        if not rows:
-            text = "📡 No connected chats."
-        else:
-            text = "📡 CONNECTED CHATS\n\n"
-            for r in rows:
+        text = "📡 No connected chats." if not rows else "📡 CONNECTED CHATS\n\n"
+        for r in rows:
+            if rows:
                 text += f"{'✅' if r['can_ban'] else '⚠️'} {r['title']}\n  {r['chat_type']} | ID: {r['chat_id']}\n"
         return await q.edit_message_text(text, reply_markup=panel())
 
@@ -272,8 +280,10 @@ async def owner_text(update, context):
         return await update.message.reply_text("❌ Invalid numeric User ID.")
     add_admin(uid)
     context.user_data.pop("adding", None)
-    await update.message.reply_text(f"✅ Admin added\n\nUser ID: `{uid}`",
-                                    parse_mode="Markdown", reply_markup=panel())
+    await update.message.reply_text(
+        f"✅ Admin added\n\nUser ID: `{uid}`",
+        parse_mode="Markdown", reply_markup=panel()
+    )
 
 async def my_chat_member(update, context):
     cm = update.my_chat_member
@@ -282,9 +292,11 @@ async def my_chat_member(update, context):
     chat = cm.chat
     if cm.new_chat_member.status == ChatMemberStatus.ADMINISTRATOR:
         can_ban = await register_chat(chat, context)
-        await owner_dm(context,
+        await owner_dm(
+            context,
             f"📡 NEW CHAT CONNECTED\n\nName: {chat.title or chat.id}\n"
-            f"Type: {chat.type}\nID: `{chat.id}`\nBan permission: {'✅' if can_ban else '⚠️'}")
+            f"Type: {chat.type}\nID: `{chat.id}`\nBan permission: {'✅' if can_ban else '⚠️'}"
+        )
     elif cm.new_chat_member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED):
         save_chat(chat.id, chat.title or str(chat.id), chat.type, False, 0)
         await owner_dm(context, f"⚠️ BOT REMOVED\n\n{chat.title or chat.id}\nID: `{chat.id}`")
@@ -293,9 +305,10 @@ async def error_handler(update, context):
     log.exception("Unhandled error", exc_info=context.error)
 
 def main():
-    if not BOT_TOKEN or BOT_TOKEN == "PASTE_BOT_TOKEN_HERE":
+    if not BOT_TOKEN or BOT_TOKEN == "PASTE_YOUR_BOT_TOKEN_HERE":
         raise RuntimeError("Set BOT_TOKEN in info.py")
     init_db()
+    threading.Thread(target=start_health_server, daemon=True).start()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("panel", panel_cmd))

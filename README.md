@@ -1,36 +1,29 @@
-# Telegram Ban-All Bot
+# Koyeb-ready Telegram Ban-All Bot
 
-## Files
+## Koyeb
 
-- `bot.py` — main bot
-- `info.py` — BOT_TOKEN, OWNER_ID and optional initial admins
-- `requirements.txt` — dependency
-- `bot.db` — created automatically
+Start command can be left empty because `Procfile` contains:
+
+`web: python bot.py`
+
+The app listens on `0.0.0.0:8000` for Koyeb health checks while the Telegram bot uses polling.
+
+If configuring Koyeb manually, use:
+- Port: `8000`
+- Protocol: HTTP/TCP as appropriate for your service
+- Health path: `/health`
 
 ## Setup
 
-1. Open `info.py`.
-2. Put your BotFather token in `BOT_TOKEN`.
-3. Put your numeric Telegram ID in `OWNER_ID`.
-4. Optionally add initial admin IDs to `ADMINS`.
-5. Install:
-   `pip install -r requirements.txt`
-6. Run:
-   `python bot.py`
+Edit `info.py`:
+- `BOT_TOKEN`
+- `OWNER_ID`
+- optional `ADMINS`
 
-## Features
+Then deploy. `bot.db` is created automatically.
 
-- Owner button panel.
-- Add/remove admins from buttons.
-- Automatic chat registration when the bot becomes an administrator.
-- Connected chat list.
-- `/banall USER_ID`
-- Reply to a user's message with `/banall`.
-- `/unbanall USER_ID`
-- Per-chat permission checking.
-- Per-chat ban verification.
-- Owner DM report.
+## Security
 
-## Telegram limitation
+Do NOT publish `info.py` containing your real bot token in a public GitHub repository.
 
-The bot can only ban users in chats where it is present and has the required administrator permission. It cannot globally ban someone from arbitrary Telegram chats it does not control.
+If a bot token has been exposed publicly, revoke it in BotFather and put the newly generated token in `info.py`.
